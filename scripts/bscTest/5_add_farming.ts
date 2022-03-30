@@ -24,16 +24,13 @@ async function main() {
 
   console.log('POOL Length', poolLength)
   // Please run one by on by commentting and uncommentting each line
-  await masterChef.add(POOLS[0].allocPoint, POOLS[0].lpToken, true)
-  // await masterChef.add(POOLS[1].allocPoint, POOLS[1].lpToken, true)
-  // await masterChef.add(POOLS[2].allocPoint, POOLS[2].lpToken, true)
-  // await masterChef.add(POOLS[3].allocPoint, POOLS[3].lpToken, true)
-
-  // for (let i = 0; i < POOLS.length; i++) {
-  //   console.log(POOLS[i])
-  //   await masterChef.set(i + 1, POOLS[i].allocPoint, false)
-  //   console.log(await masterChef.poolInfo(i + 1))
-  // }
+  for (let i = 0; i < POOLS.length; i++) {
+    console.log(POOLS[i])
+    const tx = await masterChef.add(POOLS[i].allocPoint, POOLS[i].lpToken, true)
+    // const tx = await masterChef.set(i, POOLS[i].allocPoint, false)
+    await tx.wait()
+    console.log(await masterChef.poolInfo(i))
+  }
 }
 
 main().catch((error) => {

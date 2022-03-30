@@ -5,7 +5,6 @@ import '@pancakeswap/pancake-swap-lib/contracts/token/BEP20/IBEP20.sol';
 import '@pancakeswap/pancake-swap-lib/contracts/token/BEP20/SafeBEP20.sol';
 import '@pancakeswap/pancake-swap-lib/contracts/access/Ownable.sol';
 
-import './SyrupBar.sol';
 import '../Milky.sol';
 
 // MasterChef is the master of Milky. He can make Milky and he is a fair guy.
@@ -48,8 +47,6 @@ contract MasterChef is Ownable {
 
     // The MILKY TOKEN!
     Milky public milky;
-    // The SYRUP TOKEN!
-    SyrupBar public syrup;
     // Dev address.
     address public devaddr;
     // MILKY tokens created per block.
@@ -72,26 +69,15 @@ contract MasterChef is Ownable {
 
     constructor(
         Milky _milky,
-        SyrupBar _syrup,
         address _devaddr,
         uint256 _milkyPerBlock,
         uint256 _startBlock
     ) public {
         milky = _milky;
-        syrup = _syrup;
         devaddr = _devaddr;
         milkyPerBlock = _milkyPerBlock;
         startBlock = _startBlock;
-
-        // staking pool
-        poolInfo.push(PoolInfo({
-            lpToken: _milky,
-            allocPoint: 1000,
-            lastRewardBlock: startBlock,
-            accMilkyPerShare: 0
-        }));
-
-        totalAllocPoint = 1000;
+        totalAllocPoint = 0;
     }
 
     function updateMultiplier(uint256 multiplierNumber) public onlyOwner {
@@ -135,14 +121,10 @@ contract MasterChef is Ownable {
     function updateStakingPool() internal {
         uint256 length = poolInfo.length;
         uint256 points = 0;
-        for (uint256 pid = 1; pid < length; ++pid) {
+        for (uint256 pid = 0; pid < length; ++pid) {
             points = points.add(poolInfo[pid].allocPoint);
         }
-        if (points != 0) {
-            points = points.div(3);
-            totalAllocPoint = totalAllocPoint.sub(poolInfo[0].allocPoint).add(points);
-            poolInfo[0].allocPoint = points;
-        }
+        totalAllocPoint = points;
     }
 
     // Return reward multiplier over the given _from to _to block.
@@ -161,7 +143,7 @@ contract MasterChef is Ownable {
             uint256 milkyReward = multiplier.mul(milkyPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
             accMilkyPerShare = accMilkyPerShare.add(milkyReward.mul(1e12).div(lpSupply));
         }
-        return user.amount.mul(accMilkyPerShare).div(1e12).sub(user.rewardDebt);
+        return user.amount.mul(accMilkyPerShare).div(1e12).sub(user.rewardDebt).add(user.pending);
     }
 
     // Update reward variables for all pools. Be careful of gas spending!
@@ -171,7 +153,6 @@ contract MasterChef is Ownable {
             updatePool(pid);
         }
     }
-
 
     // Update reward variables of the given pool to be up-to-date.
     function updatePool(uint256 _pid) public {
@@ -187,31 +168,32 @@ contract MasterChef is Ownable {
         uint256 multiplier = getMultiplier(pool.lastRewardBlock, block.number);
         uint256 milkyReward = multiplier.mul(milkyPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
         milky.mintTo(devaddr, milkyReward.div(10));
-        milky.mintTo(address(syrup), milkyReward);
+        milky.mintTo(address(this), milkyReward);
         pool.accMilkyPerShare = pool.accMilkyPerShare.add(milkyReward.mul(1e12).div(lpSupply));
         pool.lastRewardBlock = block.number;
     }
 
+    function claimRewards(PoolInfo storage pool, UserInfo storage user) internal {
+        uint256 pending = user.amount.mul(pool.accMilkyPerShare).div(1e12).sub(user.rewardDebt);
+        if (pending > 0) {
+            if (block.timestamp <= user.depositTime + 90 days) { // if user claims within 3 months since the last deposit time
+                uint256 released = pending.mul(25).div(100); // release the 25% of the rewards
+                user.pending = user.pending.add(pending.sub(released)); // lock the 75% of the rewards
+                safeMilkyTransfer(msg.sender, released);
+            } else { // if user makes no deposit for 3 months since the last deposit time
+                safeMilkyTransfer(msg.sender, user.pending.add(pending)); // release the locked rewards
+                user.pending = 0;
+            }
+        }
+    }
+
     // Deposit LP tokens to MasterChef for MILKY allocation.
     function deposit(uint256 _pid, uint256 _amount) public {
-
-        require (_pid != 0, 'deposit MILKY by staking');
-
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         updatePool(_pid);
         if (user.amount > 0) {
-            uint256 pending = user.amount.mul(pool.accMilkyPerShare).div(1e12).sub(user.rewardDebt);
-            if (pending > 0) {
-                if (block.timestamp <= user.depositTime + 90 days) {
-                    uint256 released = pending.mul(25).div(100);
-                    user.pending = user.pending.add(pending.sub(released));
-                    safeMilkyTransfer(msg.sender, released);
-                } else {
-                    safeMilkyTransfer(msg.sender, user.pending.add(pending));
-                    user.pending = 0;
-                }
-            }
+            claimRewards(pool, user);
         }
         if (_amount > 0) {
             pool.lpToken.safeTransferFrom(address(msg.sender), address(this), _amount);
@@ -224,24 +206,12 @@ contract MasterChef is Ownable {
 
     // Withdraw LP tokens from MasterChef.
     function withdraw(uint256 _pid, uint256 _amount) public {
-
-        require (_pid != 0, 'withdraw MILKY by unstaking');
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         require(user.amount >= _amount, "withdraw: not good");
 
         updatePool(_pid);
-        uint256 pending = user.amount.mul(pool.accMilkyPerShare).div(1e12).sub(user.rewardDebt);
-        if (pending > 0) {
-            if (block.timestamp <= user.depositTime + 90 days) {
-                uint256 released = pending.mul(25).div(100);
-                user.pending = user.pending.add(pending.sub(released));
-                safeMilkyTransfer(msg.sender, released);
-            } else {
-                safeMilkyTransfer(msg.sender, user.pending.add(pending));
-                user.pending = 0;
-            }
-        }
+        claimRewards(pool, user);
         if(_amount > 0) {
             user.amount = user.amount.sub(_amount);
             pool.lpToken.safeTransfer(address(msg.sender), _amount);
@@ -250,62 +220,14 @@ contract MasterChef is Ownable {
         emit Withdraw(msg.sender, _pid, _amount);
     }
 
-    // Stake MILKY tokens to MasterChef
-    function enterStaking(uint256 _amount) public {
-        PoolInfo storage pool = poolInfo[0];
-        UserInfo storage user = userInfo[0][msg.sender];
-        updatePool(0);
-        if (user.amount > 0) {
-            uint256 pending = user.amount.mul(pool.accMilkyPerShare).div(1e12).sub(user.rewardDebt);
-            if(pending > 0) {
-                safeMilkyTransfer(msg.sender, pending);
-            }
-        }
-        if(_amount > 0) {
-            pool.lpToken.safeTransferFrom(address(msg.sender), address(this), _amount);
-            user.amount = user.amount.add(_amount);
-        }
-        user.rewardDebt = user.amount.mul(pool.accMilkyPerShare).div(1e12);
-
-        syrup.mint(msg.sender, _amount);
-        emit Deposit(msg.sender, 0, _amount);
-    }
-
-    // Withdraw MILKY tokens from STAKING.
-    function leaveStaking(uint256 _amount) public {
-        PoolInfo storage pool = poolInfo[0];
-        UserInfo storage user = userInfo[0][msg.sender];
-        require(user.amount >= _amount, "withdraw: not good");
-        updatePool(0);
-        uint256 pending = user.amount.mul(pool.accMilkyPerShare).div(1e12).sub(user.rewardDebt);
-        if(pending > 0) {
-            safeMilkyTransfer(msg.sender, pending);
-        }
-        if(_amount > 0) {
-            user.amount = user.amount.sub(_amount);
-            pool.lpToken.safeTransfer(address(msg.sender), _amount);
-        }
-        user.rewardDebt = user.amount.mul(pool.accMilkyPerShare).div(1e12);
-
-        syrup.burn(msg.sender, _amount);
-        emit Withdraw(msg.sender, 0, _amount);
-    }
-
-    // Withdraw without caring about rewards. EMERGENCY ONLY.
-    function emergencyWithdraw(uint256 _pid) public {
-        PoolInfo storage pool = poolInfo[_pid];
-        UserInfo storage user = userInfo[_pid][msg.sender];
-        pool.lpToken.safeTransfer(address(msg.sender), user.amount);
-        emit EmergencyWithdraw(msg.sender, _pid, user.amount);
-        user.amount = 0;
-        user.rewardDebt = 0;
-        user.pending = 0;
-        user.depositTime = 0;
-    }
-
     // Safe milky transfer function, just in case if rounding error causes pool to not have enough MILKYs.
     function safeMilkyTransfer(address _to, uint256 _amount) internal {
-        syrup.safeMilkyTransfer(_to, _amount);
+        uint256 milkyBal = milky.balanceOf(address(this));
+        if (_amount > milkyBal) {
+            milky.transfer(_to, milkyBal);
+        } else {
+            milky.transfer(_to, _amount);
+        }
     }
 
     // Update dev address by the previous dev.
