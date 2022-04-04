@@ -74,7 +74,7 @@ describe('MilkyRouter', function () {
 
     await masterChef.connect(user1).withdraw(0, 10)
     expect(await lp1.balanceOf(user1.address)).to.equal(1950)
-    expect(await milkyToken.balanceOf(user1.address)).to.equal(568)
+    expect(await milkyToken.balanceOf(user1.address)).to.equal(716)
     expect(await milkyToken.balanceOf(dev.address)).to.equal(228)
 
     console.log(await masterChef.userInfo(0, user1.address))

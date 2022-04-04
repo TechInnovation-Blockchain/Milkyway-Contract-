@@ -22,8 +22,7 @@ contract MasterChef is Ownable {
     struct UserInfo {
         uint256 amount;     // How many LP tokens the user has provided.
         uint256 rewardDebt; // Reward debt. See explanation below.
-        uint256 pending;    // How many Milky tokens the user get rewarded.
-        uint256 depositTime;
+        uint256 locked;
         //
         // We do some fancy math here. Basically, any point in time, the amount of MILKYs
         // entitled to a user but is pending to be distributed is:
@@ -35,6 +34,12 @@ contract MasterChef is Ownable {
         //   2. User receives the pending reward sent to his/her address.
         //   3. User's `amount` gets updated.
         //   4. User's `rewardDebt` gets updated.
+    }
+
+    struct UserDeposit {
+        uint256 amount;
+        uint256 locked;
+        uint256 depositTime;
     }
 
     // Info of each pool.
@@ -58,6 +63,8 @@ contract MasterChef is Ownable {
     PoolInfo[] public poolInfo;
     // Info of each user that stakes LP tokens.
     mapping (uint256 => mapping (address => UserInfo)) public userInfo;
+    // Info of each user that deposit LP tokens.
+    mapping (uint256 => mapping (address => UserDeposit[])) public userDeposit;
     // Total allocation points. Must be the sum of all allocation points in all pools.
     uint256 public totalAllocPoint = 0;
     // The block number when MILKY mining starts.
@@ -143,7 +150,20 @@ contract MasterChef is Ownable {
             uint256 milkyReward = multiplier.mul(milkyPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
             accMilkyPerShare = accMilkyPerShare.add(milkyReward.mul(1e12).div(lpSupply));
         }
-        return user.amount.mul(accMilkyPerShare).div(1e12).sub(user.rewardDebt).add(user.pending);
+        uint256 rewards = user.amount.mul(accMilkyPerShare).div(1e12).sub(user.rewardDebt);
+        // if locked exists, sub locked from rewards, else add locked into rewards
+        if (user.amount > 0 && rewards > 0) {
+            UserDeposit[] storage deposits = userDeposit[_pid][_user];
+            for (uint256 i = user.locked; i < deposits.length; i++) {
+                uint256 rewardsPerDeposit = rewards.mul(deposits[i].amount).div(user.amount);
+                if (deposits[i].depositTime + 90 days >= block.timestamp) {
+                    rewards = rewards.sub(rewardsPerDeposit.mul(75).div(100));
+                } else {
+                    rewards = rewards.add(deposits[i].locked);
+                }
+            }
+        }
+        return rewards;
     }
 
     // Update reward variables for all pools. Be careful of gas spending!
@@ -173,32 +193,39 @@ contract MasterChef is Ownable {
         pool.lastRewardBlock = block.number;
     }
 
-    function claimRewards(PoolInfo storage pool, UserInfo storage user) internal {
-        uint256 pending = user.amount.mul(pool.accMilkyPerShare).div(1e12).sub(user.rewardDebt);
-        if (pending > 0) {
-            if (block.timestamp <= user.depositTime + 90 days) { // if user claims within 3 months since the last deposit time
-                uint256 released = pending.mul(25).div(100); // release the 25% of the rewards
-                user.pending = user.pending.add(pending.sub(released)); // lock the 75% of the rewards
-                safeMilkyTransfer(msg.sender, released);
-            } else { // if user makes no deposit for 3 months since the last deposit time
-                safeMilkyTransfer(msg.sender, user.pending.add(pending)); // release the locked rewards
-                user.pending = 0;
+    function claimRewards(PoolInfo storage pool, UserInfo storage user, UserDeposit[] storage deposits) internal {
+        uint256 rewards = user.amount.mul(pool.accMilkyPerShare).div(1e12).sub(user.rewardDebt);
+        uint256 userLocked = user.locked;
+        for (uint256 i = user.locked; i < deposits.length; i++) {
+            uint256 rewardsPerDeposit = rewards.mul(deposits[i].amount).div(user.amount);
+            if (deposits[i].depositTime + 90 days >= block.timestamp) {
+                uint256 lock = rewardsPerDeposit.mul(75).div(100);
+                deposits[i].locked = deposits[i].locked.add(lock);
+                rewards = rewards.sub(lock);
+            } else {
+                rewards = rewards.add(deposits[i].locked);
+                deposits[i].locked = 0;
+                userLocked = i + 1;
             }
         }
+        user.locked = userLocked;
+        safeMilkyTransfer(msg.sender, rewards);
     }
 
     // Deposit LP tokens to MasterChef for MILKY allocation.
     function deposit(uint256 _pid, uint256 _amount) public {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
+        UserDeposit[] storage deposits = userDeposit[_pid][msg.sender];
         updatePool(_pid);
         if (user.amount > 0) {
-            claimRewards(pool, user);
+            claimRewards(pool, user, deposits);
         }
         if (_amount > 0) {
             pool.lpToken.safeTransferFrom(address(msg.sender), address(this), _amount);
             user.amount = user.amount.add(_amount);
-            user.depositTime = block.timestamp;
+            UserDeposit memory depositInfo = UserDeposit(_amount, 0, block.timestamp);
+            deposits.push(depositInfo);
         }
         user.rewardDebt = user.amount.mul(pool.accMilkyPerShare).div(1e12);
         emit Deposit(msg.sender, _pid, _amount);
@@ -208,11 +235,26 @@ contract MasterChef is Ownable {
     function withdraw(uint256 _pid, uint256 _amount) public {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
+        UserDeposit[] storage deposits = userDeposit[_pid][msg.sender];
         require(user.amount >= _amount, "withdraw: not good");
 
         updatePool(_pid);
-        claimRewards(pool, user);
+        claimRewards(pool, user, deposits);
         if(_amount > 0) {
+            uint256 userLocked = user.locked;
+            uint256 withrawAmount = _amount;
+            for (uint256 i = user.locked; i < deposits.length; i++) {
+                if (withrawAmount >= deposits[i].amount) {
+                    withrawAmount = withrawAmount.sub(deposits[i].amount);
+                    deposits[i].amount = 0;
+                    userLocked = i + 1;
+                } else {
+                    deposits[i].amount = deposits[i].amount.sub(withrawAmount);
+                    userLocked = i;
+                    break;
+                }
+            }
+            user.locked = userLocked;
             user.amount = user.amount.sub(_amount);
             pool.lpToken.safeTransfer(address(msg.sender), _amount);
         }
