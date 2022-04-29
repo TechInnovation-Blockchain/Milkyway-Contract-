@@ -22,6 +22,9 @@ contract Treasury is Ownable {
 
     mapping(address => mapping(address => address[])) swapRoutes;
 
+    mapping(address => uint256) lpTotalOut;
+    mapping(address => mapping(address => uint256)) lpOutPerAction;
+
     constructor() public {
         // MILKY <- ANY TOKEN
         swapRoutes[MILKY][BUSD] = [WBNB];
@@ -59,16 +62,18 @@ contract Treasury is Ownable {
         return result[1];
     }
 
-    function _withraw(uint256 percent, address to) internal returns (uint256) {
+    function _withdraw(uint256 percent, address to) internal returns (uint256) {
         uint256 total = 0;
         IMilkyFactory milkyFactory = IMilkyFactory(milkyRouter.factory());
         uint256 pairsLength = milkyFactory.allPairsLength();
         address _to = to == address(0) ? WBNB : to;
         for (uint i = 0; i < pairsLength; i++) {
             IMilkyPair pair = IMilkyPair(milkyFactory.allPairs(i));
-            uint256 balance = pair.balanceOf(address(this));
-            if (balance > 0) {
-                uint256 amount = balance.mul(percent).div(10000);
+            uint256 totalInput = lpTotalOut[address(pair)].add(pair.balanceOf(address(this)));
+            if (totalInput > 0) {
+                uint256 amount = totalInput.mul(percent).div(10000).min(lpOutPerAction[to][address(pair)]);
+                lpTotalOut[address(pair)] = amount.add(lpTotalOut[address(pair)]);
+                lpOutPerAction[to][address(pair)] = amount.add(lpOutPerAction[to][address(pair)]);
                 address token0 = pair.token0();
                 address token1 = pair.token1();
                 pair.approve(address(milkyRouter), amount);
@@ -90,23 +95,24 @@ contract Treasury is Ownable {
 
     event BuyBackBurn(address indexed token, uint256 amount);
 
-    // function buyBurnTest(uint256 share, address target) public onlyOwner {
-    //     uint256 total = _withraw(share, target);
-    //     emit BuyBackBurn(target, total);
-    // }
-
-    function buyBurnMilky() public onlyOwner {
-        uint256 total = _withraw(6250, MILKY);
+    function buyBurnMilky(address burner) public onlyOwner {
+        uint256 total = _withdraw(6250, MILKY);
+        IBEP20(MILKY).transfer(burner, total);
         emit BuyBackBurn(MILKY, total);
     }
 
-    function buyBurnWsg() public onlyOwner {
-        uint256 total = _withraw(2500, WSG);
+    function buyBurnWsg(address burner) public onlyOwner {
+        uint256 total = _withdraw(2500, WSG);
+        IBEP20(WSG).transfer(burner, total);
         emit BuyBackBurn(WSG, total);
     }
 
-    function withraw() public onlyOwner {
-        uint256 total = _withraw(1250, WBNB);
+    function withdraw() public onlyOwner {
+        uint256 total = _withdraw(1250, WBNB);
         IBEP20(WBNB).transfer(msg.sender, total);
+    }
+
+    function recover(address token, uint256 amount) public onlyOwner {
+        IBEP20(token).transfer(msg.sender, amount);
     }
 }

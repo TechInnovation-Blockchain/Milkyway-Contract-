@@ -15,7 +15,7 @@ async function main() {
     BN(
       process.env.MILKY_INITIAL_SUPPLY
         ? process.env.MILKY_INITIAL_SUPPLY
-        : 1000000
+        : 250000000
     ).mul(BN(10).pow(BN(18)))
   )
   console.log('MilkyToken is deployed to:', milkyToken.address) // 0xCF2f1af5533DBf2F79f35c5B0e0F5B25bD71E601
