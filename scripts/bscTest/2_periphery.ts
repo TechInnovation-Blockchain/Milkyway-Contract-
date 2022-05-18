@@ -11,7 +11,7 @@ async function main() {
   )
   await milkyRouter.deployed()
 
-  console.log('MilkyRouter is deployed to:', milkyRouter.address) // 0xd601C5CB0D73990BB739dF60582fBd57F5Fe487D
+  console.log('MilkyRouter is deployed to:', milkyRouter.address) // 0x16F993EdFB1BcAA25A638D98f0d077D2A7F98cAF
   // please run the output of the below log for verification of this contract
   console.log(
     `npx hardhat verify --network bscTest ${milkyRouter.address} "${process.env.MILKYFACTORY_CONTRACT_ADDRESS}" "${process.env.WBNB_CONTRACT_ADDRESS}"`

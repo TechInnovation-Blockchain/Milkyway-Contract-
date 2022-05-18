@@ -148,10 +148,7 @@ contract MasterChef is Ownable {
         return _to.sub(_from).mul(BONUS_MULTIPLIER);
     }
 
-    // View function to see pending MILKYs on frontend.
-    function pendingMilky(uint256 _pid, address _user) external view returns (uint256) {
-        PoolInfo storage pool = poolInfo[_pid];
-        UserInfo storage user = userInfo[_pid][_user];
+    function getAccMilkyPerShare(PoolInfo storage pool) internal view returns (uint256) {
         uint256 accMilkyPerShare = pool.accMilkyPerShare;
         uint256 lpSupply = pool.lpToken.balanceOf(address(this));
         if (block.number > pool.lastRewardBlock && lpSupply != 0) {
@@ -159,7 +156,18 @@ contract MasterChef is Ownable {
             uint256 milkyReward = multiplier.mul(milkyPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
             accMilkyPerShare = accMilkyPerShare.add(milkyReward.mul(1e12).div(lpSupply));
         }
+        return accMilkyPerShare;
+    }
+
+    // View function to see pending MILKYs on frontend.
+    function pendingMilky(uint256 _pid, address _user) external view returns (uint256, uint256, uint256, uint256) {
+        PoolInfo storage pool = poolInfo[_pid];
+        UserInfo storage user = userInfo[_pid][_user];
+        uint256 accMilkyPerShare = getAccMilkyPerShare(pool);
+        uint256 locked = 0;
+        uint256 unlocked = 0;
         uint256 rewards = user.amount.mul(accMilkyPerShare).div(1e12).sub(user.rewardDebt);
+        uint256 instant = rewards.mul(25).div(100);
         // if locked exists, sub locked from rewards, else add locked into rewards
         if (user.amount > 0 && rewards > 0) {
             UserDeposit[] storage deposits = userDeposit[_pid][_user];
@@ -167,12 +175,14 @@ contract MasterChef is Ownable {
                 uint256 rewardsPerDeposit = rewards.mul(deposits[i].amount).div(user.amount);
                 if (deposits[i].depositTime + 90 days >= block.timestamp) {
                     rewards = rewards.sub(rewardsPerDeposit.mul(75).div(100));
+                    locked = locked.add(deposits[i].locked).add(rewardsPerDeposit.mul(75).div(100));
                 } else {
                     rewards = rewards.add(deposits[i].locked);
+                    unlocked = unlocked.add(deposits[i].locked);
                 }
             }
         }
-        return rewards;
+        return (rewards, instant, locked, unlocked);
     }
 
     // Update reward variables for all pools. Be careful of gas spending!

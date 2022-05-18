@@ -22,7 +22,7 @@ async function main() {
   )
   await masterChef.deployed()
 
-  console.log('MasterChef is deployed to:', masterChef.address) // 0xBa215B9e2E79e2c3d7e9eE644692C46436336b91
+  console.log('MasterChef is deployed to:', masterChef.address) // 0x4F664Eb09a99be79FB77948259447574a7c139fc
 
   // please run the output of the below log for verification of this contract
   console.log(

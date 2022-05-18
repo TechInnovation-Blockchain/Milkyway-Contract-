@@ -18,7 +18,7 @@ async function main() {
         : 250000000
     ).mul(BN(10).pow(BN(18)))
   )
-  console.log('MilkyToken is deployed to:', milkyToken.address) // 0xCF2f1af5533DBf2F79f35c5B0e0F5B25bD71E601
+  console.log('MilkyToken is deployed to:', milkyToken.address) // 0x37078997d9babfB9C16f35cE5736B5929c959032
   // please run the output of the below log for verification of this contract
   console.log(`npx hardhat verify --network bscTest ${milkyToken.address}`)
 }
